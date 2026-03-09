@@ -1,0 +1,19 @@
+{
+  "functions": {
+        "source": ".",
+    "runtime": "nodejs22",
+    "ignore": [
+      ".git",
+      ".firebase",
+      "firebase-debug.log",
+      "firebase-debug.*.log",
+      "mobile",
+      "data",
+      "src/public",
+      "README.md"
+    ],
+    "predeploy": [
+      "npm run build"
+    ]
+  }
+}
