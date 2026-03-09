@@ -99,6 +99,6 @@ app.listen(port, () => {
   priceAlertEngine.start();
   walletAlertEngine.start();
   console.log(
-    `autotradeSKR server on :${port} (dryRun=${dryRun}, authRequired=${authRequired}, priceAlertIntervalMs=${priceAlertIntervalMs}, walletAlertIntervalMs=${walletAlertIntervalMs})`
+    `seeker alert server on :${port} (dryRun=${dryRun}, authRequired=${authRequired}, priceAlertIntervalMs=${priceAlertIntervalMs}, walletAlertIntervalMs=${walletAlertIntervalMs})`
   );
 });

@@ -1,4 +1,4 @@
-# autotradeSKR (Solana Auto Trading MVP)
+# seeker alert
 
 这是一个可运行的 Solana 自动化交易后端 MVP，支持用户配置三类规则：
 
