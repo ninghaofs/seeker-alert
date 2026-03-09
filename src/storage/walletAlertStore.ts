@@ -57,6 +57,17 @@ export class WalletAlertStore implements WalletAlertStoreContract {
     return true;
   }
 
+  async removeForOwner(id: string, ownerWallet: string): Promise<boolean> {
+    const nextAlerts = this.alerts.filter((item) => !(item.id === id && item.ownerWallet === ownerWallet));
+    if (nextAlerts.length === this.alerts.length) {
+      return false;
+    }
+
+    this.alerts = nextAlerts;
+    await this.persist();
+    return true;
+  }
+
   private async persist(): Promise<void> {
     await fs.writeFile(ALERTS_FILE, JSON.stringify(this.alerts, null, 2), "utf-8");
   }

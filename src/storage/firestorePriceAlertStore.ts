@@ -43,6 +43,22 @@ export class FirestorePriceAlertStore implements PriceAlertStoreContract {
     return true;
   }
 
+  async removeForOwner(id: string, ownerWallet: string): Promise<boolean> {
+    const ref = this.db.collection("price_alerts").doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return false;
+    }
+
+    const data = snap.data() as PriceAlert;
+    if (data.ownerWallet !== ownerWallet) {
+      return false;
+    }
+
+    await ref.delete();
+    return true;
+  }
+
   private async fetchAll(): Promise<PriceAlert[]> {
     const snap = await this.db.collection("price_alerts").get();
     return snap.docs.map((doc) => doc.data() as PriceAlert).sort((a, b) => b.createdAt.localeCompare(a.createdAt));

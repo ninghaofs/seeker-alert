@@ -1,6 +1,7 @@
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import { Buffer } from "buffer";
+import { PublicKey } from "@solana/web3.js";
 import {
   Alert,
   NativeModules,
@@ -21,7 +22,7 @@ type AlertStatus = "active" | "triggered" | "paused";
 type WalletWatchKind = "receive_transfer" | "send_transfer" | "new_token" | "receive_nft";
 type PriceDirection = "above" | "below";
 type NftCollection = "Mad Lads" | "Claynosaurz" | "Okay Bears";
-type PricePairKey = "SOL_USDC" | "BONK_USDC" | "JUP_USDC";
+type Lang = "en" | "zh";
 
 type RadarAlert = {
   id: string;
@@ -93,27 +94,22 @@ type WalletAlertEventRecord = {
   triggeredAt: string;
 };
 
-type PricePairOption = {
-  key: PricePairKey;
-  label: string;
-  inputMint: string;
-  outputMint: string;
+type TokenMetadata = {
+  mint: string;
+  name: string;
+  symbol: string;
+  decimals?: number;
+  icon?: string;
 };
 
+const APP_NAME = "seeker alert";
 const SOLANA_CHAIN = "solana:mainnet";
 const SOLANA_RPC_ENDPOINT = "https://api.mainnet-beta.solana.com";
-const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const BONK_MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
-const JUP_MINT = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
-const PRICE_PAIRS: PricePairOption[] = [
-  { key: "SOL_USDC", label: "SOL / USDC", inputMint: SOL_MINT, outputMint: USDC_MINT },
-  { key: "BONK_USDC", label: "BONK / USDC", inputMint: BONK_MINT, outputMint: USDC_MINT },
-  { key: "JUP_USDC", label: "JUP / USDC", inputMint: JUP_MINT, outputMint: USDC_MINT }
-];
 const walletUi = loadWalletUi();
 const walletNativeEnabled = Boolean(walletUi && (NativeModules as Record<string, unknown>).SolanaMobileWalletAdapter);
-const ALERT_NOTIFICATION_CHANNEL = "price-alerts";
+const ALERT_NOTIFICATION_CHANNEL = "price-alerts-v2";
+const localAlerts: RadarAlert[] = [];
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -123,18 +119,6 @@ Notifications.setNotificationHandler({
     shouldShowList: true
   })
 });
-
-const seededAlerts: RadarAlert[] = [
-  {
-    id: "alert_madlads_floor",
-    name: "Mad Lads 地板价跌破 55",
-    type: "nft",
-    status: "paused",
-    target: "Mad Lads",
-    condition: "Floor 低于 55 SOL",
-    lastCheckedAt: "今天 11:20"
-  }
-];
 
 export default function App() {
   if (!walletNativeEnabled || !walletUi) {
@@ -146,7 +130,7 @@ export default function App() {
     <WalletProvider
       chain={SOLANA_CHAIN}
       endpoint={SOLANA_RPC_ENDPOINT}
-      identity={{ name: "Seeker Radar", uri: "https://seeker-radar.local" }}
+      identity={{ name: APP_NAME, uri: "https://seeker-alert.local" }}
     >
       <RadarScreen nativeWalletEnabled />
     </WalletProvider>
@@ -156,18 +140,21 @@ export default function App() {
 function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) {
   const wallet = useWalletBridge(nativeWalletEnabled);
 
+  const [language, setLanguage] = useState<Lang>("en");
   const [activeTab, setActiveTab] = useState<TabKey>("home");
-  const [serverBaseUrl, setServerBaseUrl] = useState("https://your-firebase-functions-url/api");
+  const [serverBaseUrl, setServerBaseUrl] = useState("https://YOUR_REGION-YOUR_PROJECT.cloudfunctions.net/api");
   const [sessionToken, setSessionToken] = useState("");
   const [creatingAlert, setCreatingAlert] = useState(false);
-  const [alerts, setAlerts] = useState<RadarAlert[]>(seededAlerts);
+  const [alerts, setAlerts] = useState<RadarAlert[]>(localAlerts);
   const [priceAlerts, setPriceAlerts] = useState<PriceAlertRecord[]>([]);
   const [walletAlerts, setWalletAlerts] = useState<WalletAlertRecord[]>([]);
   const [priceAlertEvents, setPriceAlertEvents] = useState<PriceAlertEventRecord[]>([]);
   const [walletAlertEvents, setWalletAlertEvents] = useState<WalletAlertEventRecord[]>([]);
   const [radarStatus, setRadarStatus] = useState<RadarStatus | null>(null);
   const [createType, setCreateType] = useState<AlertType>("price");
-  const [pricePairKey, setPricePairKey] = useState<PricePairKey>("SOL_USDC");
+  const [tokenMintInput, setTokenMintInput] = useState("");
+  const [resolvedToken, setResolvedToken] = useState<TokenMetadata | null>(null);
+  const [resolvingToken, setResolvingToken] = useState(false);
   const [priceDirection, setPriceDirection] = useState<PriceDirection>("above");
   const [priceThreshold, setPriceThreshold] = useState("200");
   const [walletWatchKind, setWalletWatchKind] = useState<WalletWatchKind>("receive_transfer");
@@ -181,8 +168,10 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
   const hasHydratedWalletAlerts = useRef(false);
   const sessionTokenRef = useRef("");
   const loginPromiseRef = useRef<Promise<string> | null>(null);
-  const alertSoundPlayer = useAudioPlayer(require("./assets/alert_tone.wav"), { keepAudioSessionActive: true });
-  const selectedPricePair = PRICE_PAIRS.find((item) => item.key === pricePairKey) ?? PRICE_PAIRS[0];
+  const alertSoundPlayer = useAudioPlayer(require("./assets/metal_gear_alert.wav"), { keepAudioSessionActive: true });
+  const rawWalletAddress = wallet.account?.address?.toString?.();
+  const walletConnected = Boolean(rawWalletAddress);
+  const walletAddress = rawWalletAddress ?? pick(language, "Not connected", "未连接");
   const latestCheckedAtLabel = (() => {
     const latest = priceAlerts
       .map((item) => item.lastCheckedAt)
@@ -190,53 +179,42 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
       .sort()
       .at(-1);
 
-    return latest ? formatTimestamp(latest) : "等待检查";
+    return latest ? formatTimestamp(latest, language) : pick(language, "Waiting", "等待检查");
   })();
   const autoCheckLabel = (() => {
     const intervalMs = radarStatus?.priceAlertIntervalMs;
 
     if (!intervalMs || intervalMs <= 0) {
-      return "未配置";
+      return pick(language, "Not set", "未配置");
     }
     if (intervalMs < 60000) {
-      return `${Math.round(intervalMs / 1000)} 秒`;
+      return pick(language, `${Math.round(intervalMs / 1000)} sec`, `${Math.round(intervalMs / 1000)} 秒`);
     }
 
-    return `${Math.round(intervalMs / 60000)} 分钟`;
+    return pick(language, `${Math.round(intervalMs / 60000)} min`, `${Math.round(intervalMs / 60000)} 分钟`);
   })();
-  const convertLocalPriceAlert = (priceAlert: PriceAlertRecord): RadarAlert => {
-    const comparator = priceAlert.direction === "above" ? "高于" : "低于";
-    const nextCondition =
-      priceAlert.currentPrice != null
-        ? `价格${comparator} ${priceAlert.targetPrice}，当前 ${priceAlert.currentPrice.toFixed(2)}`
-        : `价格${comparator} ${priceAlert.targetPrice}`;
-
-    return {
-      id: priceAlert.id,
-      name: priceAlert.name,
-      type: "price",
-      status: priceAlert.status,
-      target: priceAlert.pair,
-      condition: nextCondition,
-      lastCheckedAt: formatTimestamp(priceAlert.lastCheckedAt),
-      lastTriggeredAt: priceAlert.lastTriggeredAt ? formatTimestamp(priceAlert.lastTriggeredAt) : undefined
-    };
-  };
+  const convertRemotePriceAlert = (priceAlert: PriceAlertRecord): RadarAlert => ({
+    id: priceAlert.id,
+    name: priceAlert.name,
+    type: "price",
+    status: priceAlert.status,
+    target: priceAlert.pair,
+    condition: priceConditionLabel(priceAlert.direction, priceAlert.targetPrice, priceAlert.currentPrice, language),
+    lastCheckedAt: formatTimestamp(priceAlert.lastCheckedAt, language),
+    lastTriggeredAt: priceAlert.lastTriggeredAt ? formatTimestamp(priceAlert.lastTriggeredAt, language) : undefined
+  });
   const convertRemoteWalletAlert = (walletAlert: WalletAlertRecord): RadarAlert => ({
     id: walletAlert.id,
     name: walletAlert.name,
     type: "wallet",
     status: walletAlert.status,
     target: walletAlert.walletAddress,
-    condition: walletCondition(walletAlert.watchKind),
-    lastCheckedAt: formatTimestamp(walletAlert.lastCheckedAt),
-    lastTriggeredAt: walletAlert.lastTriggeredAt ? formatTimestamp(walletAlert.lastTriggeredAt) : undefined,
+    condition: walletCondition(walletAlert.watchKind, language),
+    lastCheckedAt: formatTimestamp(walletAlert.lastCheckedAt, language),
+    lastTriggeredAt: walletAlert.lastTriggeredAt ? formatTimestamp(walletAlert.lastTriggeredAt, language) : undefined,
     walletWatchKind: walletAlert.watchKind
   });
-
-  const walletAddress = wallet.account?.address?.toString?.() ?? "未连接";
-  const walletConnected = walletAddress !== "未连接";
-  const mergedAlerts = [...priceAlerts.map(convertLocalPriceAlert), ...walletAlerts.map(convertRemoteWalletAlert), ...alerts];
+  const mergedAlerts = [...priceAlerts.map(convertRemotePriceAlert), ...walletAlerts.map(convertRemoteWalletAlert), ...alerts];
   const activeCount = mergedAlerts.filter((item) => item.status === "active").length;
   const triggeredToday = mergedAlerts.filter((item) => item.status === "triggered").length;
 
@@ -281,17 +259,46 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
     }
 
     const timer = setInterval(() => {
-      void refreshPriceAlerts(false);
+      void checkPriceAlerts(false);
       void refreshPriceAlertEvents();
-      void refreshWalletAlerts(false);
+      void checkWalletAlerts(false);
       void refreshWalletAlertEvents();
-    }, 10000);
+    }, 5000);
 
     return () => clearInterval(timer);
   }, [serverBaseUrl, sessionToken]);
 
+  useEffect(() => {
+    if (createType !== "price") {
+      return;
+    }
+
+    const nextMint = tokenMintInput.trim();
+    if (!nextMint) {
+      setResolvedToken(null);
+      return;
+    }
+
+    try {
+      new PublicKey(nextMint);
+    } catch {
+      setResolvedToken(null);
+      return;
+    }
+
+    if (resolvedToken?.mint === nextMint) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void resolveTokenMetadata(false);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [createType, tokenMintInput, serverBaseUrl, resolvedToken?.mint]);
+
   function show(message: string) {
-    Alert.alert("提示", message);
+    Alert.alert(pick(language, "Notice", "提示"), message);
   }
 
   async function callApi(path: string, init?: RequestInit) {
@@ -316,9 +323,58 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
     return data;
   }
 
+  async function resolveTokenMetadata(notify = true): Promise<TokenMetadata | null> {
+    const nextMint = tokenMintInput.trim();
+    if (!nextMint) {
+      setResolvedToken(null);
+      if (notify) {
+        show(pick(language, "Enter a token CA first.", "请先输入代币合约地址"));
+      }
+      return null;
+    }
+
+    try {
+      new PublicKey(nextMint);
+    } catch {
+      setResolvedToken(null);
+      if (notify) {
+        show(pick(language, "Invalid Solana token CA.", "无效的 Solana 代币合约地址"));
+      }
+      return null;
+    }
+
+    setResolvingToken(true);
+    try {
+      const response = await fetch(`${serverBaseUrl}/api/token-meta?mint=${encodeURIComponent(nextMint)}`);
+      const data = (await response.json()) as TokenMetadata | { error?: string };
+      if (!response.ok || !("mint" in data)) {
+        throw new Error(typeof data === "object" && data && "error" in data && data.error ? data.error : "token metadata not found");
+      }
+      setResolvedToken(data);
+      if (notify) {
+        show(
+          pick(
+            language,
+            `Tracking ${data.name} (${data.symbol}).`,
+            `已识别代币 ${data.name}（${data.symbol}）`
+          )
+        );
+      }
+      return data;
+    } catch (error) {
+      setResolvedToken(null);
+      if (notify) {
+        show(error instanceof Error ? error.message : String(error));
+      }
+      return null;
+    } finally {
+      setResolvingToken(false);
+    }
+  }
+
   async function onConnectWallet() {
     if (!nativeWalletEnabled) {
-      show("当前运行的是 Expo Go，不支持原生钱包连接。请打开已安装的 Dev Client。");
+      show(pick(language, "Expo Go cannot use the native wallet. Open the installed Dev Client.", "当前运行的是 Expo Go，不支持原生钱包连接。请打开已安装的 Dev Client。"));
       return;
     }
 
@@ -330,7 +386,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
       await refreshWalletAlerts(false);
       await refreshWalletAlertEvents();
       await refreshRadarStatus();
-      show("钱包已连接并登录");
+      show(pick(language, "Wallet connected and signed in.", "钱包已连接并登录"));
     } catch (error) {
       show(error instanceof Error ? error.message : String(error));
     }
@@ -338,21 +394,20 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
 
   async function onDisconnectWallet() {
     if (!nativeWalletEnabled) {
-      show("当前运行的是 Expo Go，不支持原生钱包连接。请打开已安装的 Dev Client。");
+      show(pick(language, "Expo Go cannot use the native wallet. Open the installed Dev Client.", "当前运行的是 Expo Go，不支持原生钱包连接。请打开已安装的 Dev Client。"));
       return;
     }
 
     try {
       await wallet.disconnect();
       setSessionToken("");
-      show("钱包已断开");
+      show(pick(language, "Wallet disconnected.", "钱包已断开"));
     } catch (error) {
       show(error instanceof Error ? error.message : String(error));
     }
   }
 
   function onCreateAlert() {
-    console.log("[radar] create alert pressed", { createType });
     if (creatingAlert) {
       return;
     }
@@ -360,28 +415,38 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
     if (createType === "price") {
       const threshold = Number(priceThreshold);
       if (!Number.isFinite(threshold) || threshold <= 0) {
-        show("请输入有效的价格数字");
+        show(pick(language, "Enter a valid target price.", "请输入有效的价格数字"));
         return;
       }
 
-      const directionLabel = priceDirection === "above" ? "高于" : "低于";
-      void createPriceAlert(
-        `${selectedPricePair.label.split(" / ")[0]} ${directionLabel} ${threshold}`,
-        selectedPricePair.label,
-        `价格${directionLabel} ${threshold}`,
-        selectedPricePair.inputMint,
-        selectedPricePair.outputMint
-      );
+      const tokenMeta = resolvedToken?.mint === tokenMintInput.trim() ? resolvedToken : undefined;
+      const createWithToken = async () => {
+        const resolved = tokenMeta ?? (await resolveTokenMetadata(false));
+        if (!resolved) {
+          return;
+        }
+
+        void createPriceAlert(
+          priceAlertName(resolved.symbol, priceDirection, threshold, language),
+          `${resolved.symbol} / USDC`,
+          resolved.mint,
+          USDC_MINT,
+          priceDirection,
+          threshold
+        );
+      };
+
+      void createWithToken();
       return;
     }
 
     if (createType === "wallet") {
-      if (!walletConnected) {
-        show("请先连接钱包");
+      if (!rawWalletAddress) {
+        show(pick(language, "Connect your wallet first.", "请先连接钱包"));
         return;
       }
 
-      void createWalletAlert(walletAddress, walletWatchKind);
+      void createWalletAlert(rawWalletAddress, walletWatchKind);
       return;
     }
 
@@ -391,29 +456,29 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
       nftCollection,
       nftDirection,
       nftThreshold,
-      walletConnected ? walletAddress : "未连接钱包"
+      rawWalletAddress,
+      language
     );
     if (!nextAlert) {
-      show("请输入有效的数字");
+      show(pick(language, "Enter a valid number.", "请输入有效的数字"));
       return;
     }
 
     setAlerts((current) => [nextAlert, ...current]);
     setActiveTab("alerts");
-    show("提醒已创建");
+    show(pick(language, "Alert created.", "提醒已创建"));
   }
 
   async function createPriceAlert(
     name: string,
     pair: string,
-    rawCondition: string,
     inputMint: string,
-    outputMint: string
+    outputMint: string,
+    direction: PriceDirection,
+    targetPrice: number
   ) {
     setCreatingAlert(true);
     try {
-      console.log("[radar] creating price alert", { name, pair, inputMint, outputMint });
-      const parsed = parsePriceCondition(rawCondition);
       await callApi("/api/radar/price-alerts", {
         method: "POST",
         body: JSON.stringify({
@@ -421,15 +486,14 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
           pair,
           inputMint,
           outputMint,
-          direction: parsed.direction,
-          targetPrice: parsed.targetPrice
+          direction,
+          targetPrice
         })
       });
       await refreshPriceAlerts(false);
       setActiveTab("alerts");
-      show("价格提醒已创建，并同步到后端");
+      show(pick(language, "Price alert created and synced.", "价格提醒已创建，并同步到后端"));
     } catch (error) {
-      console.log("[radar] create price alert failed", error);
       show(error instanceof Error ? error.message : String(error));
     } finally {
       setCreatingAlert(false);
@@ -439,20 +503,18 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
   async function createWalletAlert(nextWalletAddress: string, watchKind: WalletWatchKind) {
     setCreatingAlert(true);
     try {
-      console.log("[radar] creating wallet alert", { nextWalletAddress, watchKind });
       await callApi("/api/radar/wallet-alerts", {
         method: "POST",
         body: JSON.stringify({
-          name: walletAlertName(watchKind),
+          name: walletAlertName(watchKind, language),
           walletAddress: nextWalletAddress,
           watchKind
         })
       });
       await refreshWalletAlerts(false);
       setActiveTab("alerts");
-      show("钱包提醒已创建，并同步到后端");
+      show(pick(language, "Wallet alert created and synced.", "钱包提醒已创建，并同步到后端"));
     } catch (error) {
-      console.log("[radar] create wallet alert failed", error);
       show(error instanceof Error ? error.message : String(error));
     } finally {
       setCreatingAlert(false);
@@ -465,7 +527,11 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
       maybeNotifyTriggeredAlerts(data);
       setPriceAlerts(data);
       if (notify) {
-        show(data.length === 0 ? "后端里还没有价格提醒" : `已刷新 ${data.length} 条价格提醒`);
+        show(
+          data.length === 0
+            ? pick(language, "No price alerts on the server yet.", "后端里还没有价格提醒")
+            : pick(language, `Refreshed ${data.length} price alerts.`, `已刷新 ${data.length} 条价格提醒`)
+        );
       }
     } catch (error) {
       show(error instanceof Error ? error.message : String(error));
@@ -478,7 +544,11 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
       maybeNotifyTriggeredWalletAlerts(data);
       setWalletAlerts(data);
       if (notify) {
-        show(data.length === 0 ? "后端里还没有钱包提醒" : `已刷新 ${data.length} 条钱包提醒`);
+        show(
+          data.length === 0
+            ? pick(language, "No wallet alerts on the server yet.", "后端里还没有钱包提醒")
+            : pick(language, `Refreshed ${data.length} wallet alerts.`, `已刷新 ${data.length} 条钱包提醒`)
+        );
       }
     } catch (error) {
       show(error instanceof Error ? error.message : String(error));
@@ -518,16 +588,16 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
       alertSoundPlayer.play();
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: "Seeker Radar 测试提醒",
-          body: "这是一条测试通知，用来确认声音和系统通知是否正常。",
-          sound: "alert_tone.wav"
+          title: pick(language, `${APP_NAME} test alert`, `${APP_NAME} 测试提醒`),
+          body: pick(language, "This is a test notification for sound and system alerts.", "这是一条测试通知，用来确认声音和系统通知是否正常。"),
+          sound: "metal_gear_alert.wav"
         },
         trigger: {
           type: "channel",
           channelId: ALERT_NOTIFICATION_CHANNEL
         } as unknown as Notifications.NotificationTriggerInput
       });
-      show("测试通知已发送");
+      show(pick(language, "Test notification sent.", "测试通知已发送"));
     } catch (error) {
       show(error instanceof Error ? error.message : String(error));
     }
@@ -557,15 +627,17 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
 
     const first = newlyTriggered[0];
     const message =
-      newlyTriggered.length === 1 ? `${first.name} 已命中` : `${first.name} 等 ${newlyTriggered.length} 条提醒已命中`;
+      newlyTriggered.length === 1
+        ? pick(language, `${first.name} triggered.`, `${first.name} 已命中`)
+        : pick(language, `${first.name} and ${newlyTriggered.length - 1} more alerts triggered.`, `${first.name} 等 ${newlyTriggered.length} 条提醒已命中`);
 
     void alertSoundPlayer.seekTo(0).catch(() => undefined);
     alertSoundPlayer.play();
     void Notifications.scheduleNotificationAsync({
       content: {
-        title: "Seeker Radar 提醒命中",
+        title: pick(language, `${APP_NAME} price alert`, `${APP_NAME} 提醒命中`),
         body: message,
-        sound: "alert_tone.wav"
+        sound: "metal_gear_alert.wav"
       },
       trigger: {
         type: "channel",
@@ -575,7 +647,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
 
     if (message !== lastTriggeredNotice) {
       setLastTriggeredNotice(message);
-      Alert.alert("提醒命中", message);
+      Alert.alert(pick(language, "Alert triggered", "提醒命中"), message);
     }
   }
 
@@ -602,14 +674,14 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
     }
 
     const first = newlyTriggered[0];
-    const message = `${first.name} 已命中`;
+    const message = pick(language, `${first.name} triggered.`, `${first.name} 已命中`);
     void alertSoundPlayer.seekTo(0).catch(() => undefined);
     alertSoundPlayer.play();
     void Notifications.scheduleNotificationAsync({
       content: {
-        title: "Seeker Radar 钱包异动",
+        title: pick(language, `${APP_NAME} wallet alert`, `${APP_NAME} 钱包异动`),
         body: message,
-        sound: "alert_tone.wav"
+        sound: "metal_gear_alert.wav"
       },
       trigger: {
         type: "channel",
@@ -618,27 +690,37 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
     });
   }
 
-  async function checkPriceAlerts() {
+  async function checkPriceAlerts(notify = true) {
     try {
       const result = (await callApi("/api/radar/price-alerts/check", { method: "POST" })) as {
         alerts: PriceAlertRecord[];
       };
+      maybeNotifyTriggeredAlerts(result.alerts);
       setPriceAlerts(result.alerts);
-      show("价格提醒已检查");
+      if (notify) {
+        show(pick(language, "Price alerts checked.", "价格提醒已检查"));
+      }
     } catch (error) {
-      show(error instanceof Error ? error.message : String(error));
+      if (notify) {
+        show(error instanceof Error ? error.message : String(error));
+      }
     }
   }
 
-  async function checkWalletAlerts() {
+  async function checkWalletAlerts(notify = true) {
     try {
       const result = (await callApi("/api/radar/wallet-alerts/check", { method: "POST" })) as {
         alerts: WalletAlertRecord[];
       };
+      maybeNotifyTriggeredWalletAlerts(result.alerts);
       setWalletAlerts(result.alerts);
-      show("钱包提醒已检查");
+      if (notify) {
+        show(pick(language, "Wallet alerts checked.", "钱包提醒已检查"));
+      }
     } catch (error) {
-      show(error instanceof Error ? error.message : String(error));
+      if (notify) {
+        show(error instanceof Error ? error.message : String(error));
+      }
     }
   }
 
@@ -650,7 +732,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
         body: JSON.stringify({ status: nextStatus })
       });
       await refreshPriceAlerts(false);
-      show(nextStatus === "paused" ? "价格提醒已暂停" : "价格提醒已恢复");
+      show(nextStatus === "paused" ? pick(language, "Price alert paused.", "价格提醒已暂停") : pick(language, "Price alert resumed.", "价格提醒已恢复"));
     } catch (error) {
       show(error instanceof Error ? error.message : String(error));
     }
@@ -662,7 +744,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
         method: "DELETE"
       });
       setPriceAlerts((current) => current.filter((item) => item.id !== id));
-      show("价格提醒已删除");
+      show(pick(language, "Price alert deleted.", "价格提醒已删除"));
     } catch (error) {
       show(error instanceof Error ? error.message : String(error));
     }
@@ -676,7 +758,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
         body: JSON.stringify({ status: nextStatus })
       });
       await refreshWalletAlerts(false);
-      show(nextStatus === "paused" ? "钱包提醒已暂停" : "钱包提醒已恢复");
+      show(nextStatus === "paused" ? pick(language, "Wallet alert paused.", "钱包提醒已暂停") : pick(language, "Wallet alert resumed.", "钱包提醒已恢复"));
     } catch (error) {
       show(error instanceof Error ? error.message : String(error));
     }
@@ -688,7 +770,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
         method: "DELETE"
       });
       setWalletAlerts((current) => current.filter((item) => item.id !== id));
-      show("钱包提醒已删除");
+      show(pick(language, "Wallet alert deleted.", "钱包提醒已删除"));
     } catch (error) {
       show(error instanceof Error ? error.message : String(error));
     }
@@ -697,7 +779,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
   async function loginWithWallet(nextWalletAddress?: string) {
     const resolvedWalletAddress = nextWalletAddress ?? wallet.account?.address?.toString?.();
     if (!resolvedWalletAddress) {
-      throw new Error("钱包还没有返回地址");
+      throw new Error(pick(language, "Wallet address is unavailable.", "钱包还没有返回地址"));
     }
 
     const nonceRes = (await fetch(
@@ -712,7 +794,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
 
     const signInResult = await wallet.signIn({
       domain: extractDomain(serverBaseUrl),
-      statement: "Sign in to Seeker Radar",
+      statement: `Sign in to ${APP_NAME}`,
       uri: serverBaseUrl,
       version: "1",
       chainId: SOLANA_CHAIN,
@@ -750,7 +832,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
 
     const nextWalletAddress = wallet.account?.address?.toString?.();
     if (!nextWalletAddress) {
-      throw new Error("请先连接钱包并完成登录");
+      throw new Error(pick(language, "Connect your wallet and sign in first.", "请先连接钱包并完成登录"));
     }
 
     if (!loginPromiseRef.current) {
@@ -786,13 +868,22 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
       <StatusBar style="light" />
       <View style={styles.appShell}>
         <View style={styles.header}>
-          <Text style={styles.brand}>Seeker Radar</Text>
-          <Text style={styles.headerSub}>移动端链上提醒中心</Text>
+          <View style={styles.rowBetweenTop}>
+            <View style={styles.headerCopy}>
+              <Text style={styles.brand}>{APP_NAME}</Text>
+              <Text style={styles.headerSub}>{pick(language, "Mobile on-chain alert center", "移动端链上提醒中心")}</Text>
+            </View>
+            <View style={styles.languageToggle}>
+              <LanguageButton active={language === "zh"} label="中文" onPress={() => setLanguage("zh")} />
+              <LanguageButton active={language === "en"} label="English" onPress={() => setLanguage("en")} />
+            </View>
+          </View>
         </View>
 
         <ScrollView contentContainerStyle={styles.content}>
           {activeTab === "home" ? (
             <HomeTab
+              lang={language}
               activeCount={activeCount}
               alerts={mergedAlerts}
               autoCheckLabel={autoCheckLabel}
@@ -814,6 +905,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
 
           {activeTab === "alerts" ? (
             <AlertsTab
+              lang={language}
               alerts={mergedAlerts}
               autoCheckLabel={autoCheckLabel}
               onCheckPriceAlerts={checkPriceAlerts}
@@ -835,14 +927,17 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
 
           {activeTab === "create" ? (
             <CreateTab
+              lang={language}
               createType={createType}
               nftCollection={nftCollection}
               nftDirection={nftDirection}
               nftThreshold={nftThreshold}
-              pricePairKey={pricePairKey}
               priceDirection={priceDirection}
               priceThreshold={priceThreshold}
-              walletAddress={walletConnected ? walletAddress : "未连接钱包"}
+              tokenMintInput={tokenMintInput}
+              resolvedToken={resolvedToken}
+              resolvingToken={resolvingToken}
+              walletAddress={walletAddress}
               walletWatchKind={walletWatchKind}
               onCreateAlert={onCreateAlert}
               creatingAlert={creatingAlert}
@@ -850,32 +945,34 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
               onSetNftCollection={setNftCollection}
               onSetNftDirection={setNftDirection}
               onSetNftThreshold={setNftThreshold}
-              onSetPricePairKey={setPricePairKey}
               onSetPriceDirection={setPriceDirection}
               onSetPriceThreshold={setPriceThreshold}
+              onSetTokenMintInput={(value) => {
+                setTokenMintInput(value);
+                setResolvedToken(null);
+              }}
               onSetWalletWatchKind={setWalletWatchKind}
             />
           ) : null}
 
           {activeTab === "me" ? (
             <MeTab
+              lang={language}
               nativeWalletEnabled={nativeWalletEnabled}
               onTestAlertNotification={testAlertNotification}
-              serverBaseUrl={serverBaseUrl}
               walletAddress={walletAddress}
               walletConnected={walletConnected}
               onConnectWallet={onConnectWallet}
               onDisconnectWallet={onDisconnectWallet}
-              onSetServerBaseUrl={setServerBaseUrl}
             />
           ) : null}
         </ScrollView>
 
         <View style={styles.tabBar}>
-          <TabButton active={activeTab === "home"} label="首页" onPress={() => setActiveTab("home")} />
-          <TabButton active={activeTab === "alerts"} label="提醒" onPress={() => setActiveTab("alerts")} />
-          <TabButton active={activeTab === "create"} label="创建" onPress={() => setActiveTab("create")} />
-          <TabButton active={activeTab === "me"} label="我的" onPress={() => setActiveTab("me")} />
+          <TabButton active={activeTab === "home"} label={pick(language, "Home", "首页")} onPress={() => setActiveTab("home")} />
+          <TabButton active={activeTab === "alerts"} label={pick(language, "Alerts", "提醒")} onPress={() => setActiveTab("alerts")} />
+          <TabButton active={activeTab === "create"} label={pick(language, "Create", "创建")} onPress={() => setActiveTab("create")} />
+          <TabButton active={activeTab === "me"} label={pick(language, "Me", "我的")} onPress={() => setActiveTab("me")} />
         </View>
       </View>
     </SafeAreaView>
@@ -883,6 +980,7 @@ function RadarScreen({ nativeWalletEnabled }: { nativeWalletEnabled: boolean }) 
 }
 
 function HomeTab({
+  lang,
   activeCount,
   alerts,
   autoCheckLabel,
@@ -894,6 +992,7 @@ function HomeTab({
   walletAddress,
   onQuickCreate
 }: {
+  lang: Lang;
   activeCount: number;
   alerts: RadarAlert[];
   autoCheckLabel: string;
@@ -908,79 +1007,79 @@ function HomeTab({
   return (
     <View style={styles.stack}>
       <View style={styles.heroCard}>
-        <Text style={styles.heroEyebrow}>今日状态</Text>
-        <Text style={styles.heroTitle}>钱包动态和价格提醒都集中在这里。</Text>
-        <Text style={styles.heroMeta}>钱包：{walletAddress}</Text>
+        <Text style={styles.heroEyebrow}>{pick(lang, "Today", "今日状态")}</Text>
+        <Text style={styles.heroTitle}>{pick(lang, "Price and wallet alerts in one place.", "钱包动态和价格提醒都集中在这里。")}</Text>
+        <Text style={styles.heroMeta}>{pick(lang, "Wallet", "钱包")}：{walletAddress}</Text>
       </View>
 
       <View style={styles.metricsRow}>
-        <MetricCard label="运行中提醒" value={String(activeCount)} tone="blue" />
-        <MetricCard label="今日命中" value={String(triggeredToday)} tone="green" />
-        <MetricCard label="最近检查" value={latestCheckedAt} tone="orange" />
+        <MetricCard lang={lang} label={pick(lang, "Active alerts", "运行中提醒")} value={String(activeCount)} tone="blue" />
+        <MetricCard lang={lang} label={pick(lang, "Triggered today", "今日命中")} value={String(triggeredToday)} tone="green" />
+        <MetricCard lang={lang} label={pick(lang, "Last check", "最近检查")} value={latestCheckedAt} tone="orange" />
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>快捷创建</Text>
+        <Text style={styles.sectionTitle}>{pick(lang, "Quick create", "快捷创建")}</Text>
         <View style={styles.row}>
           <Pressable style={styles.button} onPress={() => onQuickCreate("price")}>
-            <Text style={styles.buttonText}>价格提醒</Text>
+            <Text style={styles.buttonText}>{pick(lang, "Price", "价格提醒")}</Text>
           </Pressable>
           <Pressable style={styles.button} onPress={() => onQuickCreate("wallet")}>
-            <Text style={styles.buttonText}>钱包异动</Text>
+            <Text style={styles.buttonText}>{pick(lang, "Wallet", "钱包异动")}</Text>
           </Pressable>
           <Pressable style={styles.button} onPress={() => onQuickCreate("nft")}>
-            <Text style={styles.buttonText}>NFT 动态</Text>
+            <Text style={styles.buttonText}>{pick(lang, "NFT", "NFT 动态")}</Text>
           </Pressable>
         </View>
-        <Text style={styles.supportText}>价格提醒由后端自动检查，当前频率：{autoCheckLabel}</Text>
+        <Text style={styles.supportText}>{pick(lang, `Price alerts are checked by the backend automatically: ${autoCheckLabel}.`, `价格提醒由后端自动检查，当前频率：${autoCheckLabel}`)}</Text>
         <Pressable style={styles.secondaryButton} onPress={() => void onCheckPriceAlerts()}>
-          <Text style={styles.secondaryButtonText}>手动检查价格提醒</Text>
+          <Text style={styles.secondaryButtonText}>{pick(lang, "Run price check now", "手动检查价格提醒")}</Text>
         </Pressable>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>最近提醒</Text>
+        <Text style={styles.sectionTitle}>{pick(lang, "Recent alerts", "最近提醒")}</Text>
         {alerts.slice(0, 3).map((item) => (
           <View key={item.id} style={styles.alertRow}>
             <View style={styles.alertInfo}>
               <Text style={styles.alertName}>{item.name}</Text>
               <Text style={styles.alertMeta}>
-                {formatType(item.type)} | {item.condition}
+                {formatType(item.type, lang)} | {item.condition}
               </Text>
             </View>
-            <StatusBadge status={item.status} />
+            <StatusBadge lang={lang} status={item.status} />
           </View>
         ))}
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>最近命中记录</Text>
-        {recentEvents.length === 0 ? <Text style={styles.supportText}>还没有价格提醒命中记录。</Text> : null}
+        <Text style={styles.sectionTitle}>{pick(lang, "Recent price triggers", "最近命中记录")}</Text>
+        {recentEvents.length === 0 ? <Text style={styles.supportText}>{pick(lang, "No price trigger history yet.", "还没有价格提醒命中记录。")}</Text> : null}
         {recentEvents.slice(0, 3).map((event) => (
           <View key={event.id} style={styles.alertRow}>
             <View style={styles.alertInfo}>
               <Text style={styles.alertName}>{event.alertName}</Text>
               <Text style={styles.alertMeta}>
-                {event.pair} | 当前 {event.currentPrice.toFixed(4)} | {formatTimestamp(event.triggeredAt)}
+                {event.pair} | {pick(lang, "Current", "当前")} {event.currentPrice.toFixed(4)} | {formatTimestamp(event.triggeredAt, lang)}
               </Text>
             </View>
-            <StatusBadge status="triggered" />
+            <StatusBadge lang={lang} status="triggered" />
           </View>
         ))}
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>最近钱包异动</Text>
-        {recentWalletEvents.length === 0 ? <Text style={styles.supportText}>还没有钱包异动记录。</Text> : null}
+        <Text style={styles.sectionTitle}>{pick(lang, "Recent wallet activity", "最近钱包异动")}</Text>
+        {recentWalletEvents.length === 0 ? <Text style={styles.supportText}>{pick(lang, "No wallet activity yet.", "还没有钱包异动记录。")}</Text> : null}
         {recentWalletEvents.slice(0, 3).map((event) => (
           <View key={event.id} style={styles.alertRow}>
             <View style={styles.alertInfo}>
               <Text style={styles.alertName}>{event.alertName}</Text>
               <Text style={styles.alertMeta}>
-                {formatWalletEvent(event)} | {formatTimestamp(event.triggeredAt)}
+                {formatWalletEvent(event, lang)} | {formatTimestamp(event.triggeredAt, lang)}
               </Text>
             </View>
-            <StatusBadge status="triggered" />
+            <StatusBadge lang={lang} status="triggered" />
           </View>
         ))}
       </View>
@@ -989,6 +1088,7 @@ function HomeTab({
 }
 
 function AlertsTab({
+  lang,
   alerts,
   autoCheckLabel,
   onCheckPriceAlerts,
@@ -1002,11 +1102,11 @@ function AlertsTab({
   onRefreshWalletAlerts,
   priceAlertEvents,
   walletAlertEvents,
-  onToggleStatus
-  ,
+  onToggleStatus,
   onTogglePriceAlert,
   onToggleWalletAlert
 }: {
+  lang: Lang;
   alerts: RadarAlert[];
   autoCheckLabel: string;
   onCheckPriceAlerts: () => Promise<void>;
@@ -1027,23 +1127,23 @@ function AlertsTab({
   return (
     <View style={styles.stack}>
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>我的提醒</Text>
-        <Text style={styles.supportText}>价格提醒由后端监控，当前自动检查频率：{autoCheckLabel}。</Text>
+        <Text style={styles.sectionTitle}>{pick(lang, "My alerts", "我的提醒")}</Text>
+        <Text style={styles.supportText}>{pick(lang, `Price alerts are monitored by the backend. Current interval: ${autoCheckLabel}.`, `价格提醒由后端监控，当前自动检查频率：${autoCheckLabel}。`)}</Text>
         <View style={styles.row}>
           <Pressable style={styles.button} onPress={() => void onRefreshPriceAlerts()}>
-            <Text style={styles.buttonText}>刷新价格提醒</Text>
+            <Text style={styles.buttonText}>{pick(lang, "Refresh price alerts", "刷新价格提醒")}</Text>
           </Pressable>
           <Pressable style={styles.secondaryButton} onPress={() => void onCheckPriceAlerts()}>
-            <Text style={styles.secondaryButtonText}>检查价格提醒</Text>
+            <Text style={styles.secondaryButtonText}>{pick(lang, "Check price alerts", "检查价格提醒")}</Text>
           </Pressable>
           <Pressable style={styles.secondaryButton} onPress={() => void onRefreshPriceAlertEvents()}>
-            <Text style={styles.secondaryButtonText}>刷新命中历史</Text>
+            <Text style={styles.secondaryButtonText}>{pick(lang, "Refresh price history", "刷新命中历史")}</Text>
           </Pressable>
           <Pressable style={styles.secondaryButton} onPress={() => void onRefreshWalletAlerts()}>
-            <Text style={styles.secondaryButtonText}>刷新钱包提醒</Text>
+            <Text style={styles.secondaryButtonText}>{pick(lang, "Refresh wallet alerts", "刷新钱包提醒")}</Text>
           </Pressable>
           <Pressable style={styles.secondaryButton} onPress={() => void onCheckWalletAlerts()}>
-            <Text style={styles.secondaryButtonText}>检查钱包提醒</Text>
+            <Text style={styles.secondaryButtonText}>{pick(lang, "Check wallet alerts", "检查钱包提醒")}</Text>
           </Pressable>
         </View>
       </View>
@@ -1053,39 +1153,39 @@ function AlertsTab({
           <View style={styles.rowBetween}>
             <View style={styles.alertInfo}>
               <Text style={styles.alertName}>{item.name}</Text>
-              <Text style={styles.alertMeta}>{formatType(item.type)}</Text>
+              <Text style={styles.alertMeta}>{formatType(item.type, lang)}</Text>
             </View>
-            <StatusBadge status={item.status} />
+            <StatusBadge lang={lang} status={item.status} />
           </View>
-          <Text style={styles.detailText}>监控对象：{item.target}</Text>
-          <Text style={styles.detailText}>触发条件：{item.condition}</Text>
-          <Text style={styles.detailText}>最后检查：{item.lastCheckedAt}</Text>
-          <Text style={styles.detailText}>最近触发：{item.lastTriggeredAt ?? "暂无"}</Text>
+          <Text style={styles.detailText}>{pick(lang, "Target", "监控对象")}：{item.target}</Text>
+          <Text style={styles.detailText}>{pick(lang, "Condition", "触发条件")}：{item.condition}</Text>
+          <Text style={styles.detailText}>{pick(lang, "Last checked", "最后检查")}：{item.lastCheckedAt}</Text>
+          <Text style={styles.detailText}>{pick(lang, "Last triggered", "最近触发")}：{item.lastTriggeredAt ?? pick(lang, "N/A", "暂无")}</Text>
           {item.type === "price" ? (
             <View style={styles.row}>
               <Pressable style={styles.button} onPress={() => void onTogglePriceAlert(item.id, item.status)}>
-                <Text style={styles.buttonText}>{item.status === "paused" ? "恢复" : "暂停"}</Text>
+                <Text style={styles.buttonText}>{item.status === "paused" ? pick(lang, "Resume", "恢复") : pick(lang, "Pause", "暂停")}</Text>
               </Pressable>
               <Pressable style={styles.secondaryButton} onPress={() => void onDeletePriceAlert(item.id)}>
-                <Text style={styles.secondaryButtonText}>删除</Text>
+                <Text style={styles.secondaryButtonText}>{pick(lang, "Delete", "删除")}</Text>
               </Pressable>
             </View>
           ) : item.type === "wallet" ? (
             <View style={styles.row}>
               <Pressable style={styles.button} onPress={() => void onToggleWalletAlert(item.id, item.status)}>
-                <Text style={styles.buttonText}>{item.status === "paused" ? "恢复" : "暂停"}</Text>
+                <Text style={styles.buttonText}>{item.status === "paused" ? pick(lang, "Resume", "恢复") : pick(lang, "Pause", "暂停")}</Text>
               </Pressable>
               <Pressable style={styles.secondaryButton} onPress={() => void onDeleteWalletAlert(item.id)}>
-                <Text style={styles.secondaryButtonText}>删除</Text>
+                <Text style={styles.secondaryButtonText}>{pick(lang, "Delete", "删除")}</Text>
               </Pressable>
             </View>
           ) : (
             <View style={styles.row}>
               <Pressable style={styles.button} onPress={() => onToggleStatus(item.id)}>
-                <Text style={styles.buttonText}>{item.status === "paused" ? "恢复" : "暂停"}</Text>
+                <Text style={styles.buttonText}>{item.status === "paused" ? pick(lang, "Resume", "恢复") : pick(lang, "Pause", "暂停")}</Text>
               </Pressable>
               <Pressable style={styles.secondaryButton} onPress={() => onDeleteAlert(item.id)}>
-                <Text style={styles.secondaryButtonText}>删除</Text>
+                <Text style={styles.secondaryButtonText}>{pick(lang, "Delete", "删除")}</Text>
               </Pressable>
             </View>
           )}
@@ -1094,40 +1194,38 @@ function AlertsTab({
 
       {alerts.length === 0 ? (
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>还没有提醒</Text>
-          <Text style={styles.supportText}>先去“创建”页面新建一条价格、钱包或 NFT 提醒，再回到这里刷新查看。</Text>
+          <Text style={styles.sectionTitle}>{pick(lang, "No alerts yet", "还没有提醒")}</Text>
+          <Text style={styles.supportText}>{pick(lang, "Create a price, wallet, or NFT alert first, then come back here to refresh.", "先去“创建”页面新建一条价格、钱包或 NFT 提醒，再回到这里刷新查看。")}</Text>
         </View>
       ) : null}
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>命中历史</Text>
-        {priceAlertEvents.length === 0 ? <Text style={styles.supportText}>还没有历史记录。</Text> : null}
+        <Text style={styles.sectionTitle}>{pick(lang, "Price trigger history", "命中历史")}</Text>
+        {priceAlertEvents.length === 0 ? <Text style={styles.supportText}>{pick(lang, "No history yet.", "还没有历史记录。")}</Text> : null}
         {priceAlertEvents.slice(0, 8).map((event) => (
           <View key={event.id} style={styles.historyItem}>
             <Text style={styles.alertName}>{event.alertName}</Text>
             <Text style={styles.alertMeta}>
-              {event.pair} | 目标 {event.targetPrice} | 当前 {event.currentPrice.toFixed(4)}
+              {event.pair} | {pick(lang, "Target", "目标")} {event.targetPrice} | {pick(lang, "Current", "当前")} {event.currentPrice.toFixed(4)}
             </Text>
-            <Text style={styles.supportText}>{formatTimestamp(event.triggeredAt)}</Text>
+            <Text style={styles.supportText}>{formatTimestamp(event.triggeredAt, lang)}</Text>
           </View>
         ))}
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>钱包异动历史</Text>
+        <Text style={styles.sectionTitle}>{pick(lang, "Wallet activity history", "钱包异动历史")}</Text>
         <View style={styles.row}>
           <Pressable style={styles.secondaryButton} onPress={() => void onRefreshWalletAlertEvents()}>
-            <Text style={styles.secondaryButtonText}>刷新钱包历史</Text>
+            <Text style={styles.secondaryButtonText}>{pick(lang, "Refresh wallet history", "刷新钱包历史")}</Text>
           </Pressable>
         </View>
-        {walletAlertEvents.length === 0 ? <Text style={styles.supportText}>还没有钱包异动历史。</Text> : null}
+        {walletAlertEvents.length === 0 ? <Text style={styles.supportText}>{pick(lang, "No wallet activity history yet.", "还没有钱包异动历史。")}</Text> : null}
         {walletAlertEvents.slice(0, 8).map((event) => (
           <View key={event.id} style={styles.historyItem}>
             <Text style={styles.alertName}>{event.alertName}</Text>
-            <Text style={styles.alertMeta}>
-              {formatWalletEvent(event)}
-            </Text>
-            <Text style={styles.supportText}>{formatTimestamp(event.triggeredAt)}</Text>
+            <Text style={styles.alertMeta}>{formatWalletEvent(event, lang)}</Text>
+            <Text style={styles.supportText}>{formatTimestamp(event.triggeredAt, lang)}</Text>
           </View>
         ))}
       </View>
@@ -1136,14 +1234,17 @@ function AlertsTab({
 }
 
 function CreateTab({
+  lang,
   createType,
   creatingAlert,
   nftCollection,
   nftDirection,
   nftThreshold,
-  pricePairKey,
   priceDirection,
   priceThreshold,
+  tokenMintInput,
+  resolvedToken,
+  resolvingToken,
   walletAddress,
   walletWatchKind,
   onCreateAlert,
@@ -1151,19 +1252,22 @@ function CreateTab({
   onSetNftCollection,
   onSetNftDirection,
   onSetNftThreshold,
-  onSetPricePairKey,
   onSetPriceDirection,
   onSetPriceThreshold,
+  onSetTokenMintInput,
   onSetWalletWatchKind
 }: {
+  lang: Lang;
   createType: AlertType;
   creatingAlert: boolean;
   nftCollection: NftCollection;
   nftDirection: PriceDirection;
   nftThreshold: string;
-  pricePairKey: PricePairKey;
   priceDirection: PriceDirection;
   priceThreshold: string;
+  tokenMintInput: string;
+  resolvedToken: TokenMetadata | null;
+  resolvingToken: boolean;
   walletAddress: string;
   walletWatchKind: WalletWatchKind;
   onCreateAlert: () => void;
@@ -1171,48 +1275,61 @@ function CreateTab({
   onSetNftCollection: (value: NftCollection) => void;
   onSetNftDirection: (value: PriceDirection) => void;
   onSetNftThreshold: (value: string) => void;
-  onSetPricePairKey: (value: PricePairKey) => void;
   onSetPriceDirection: (value: PriceDirection) => void;
   onSetPriceThreshold: (value: string) => void;
+  onSetTokenMintInput: (value: string) => void;
   onSetWalletWatchKind: (value: WalletWatchKind) => void;
 }) {
   return (
     <View style={styles.stack}>
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>创建提醒</Text>
-        <Text style={styles.supportText}>先把提醒做成本地可用 MVP，后面再接服务端推送。</Text>
+        <Text style={styles.sectionTitle}>{pick(lang, "Create alert", "创建提醒")}</Text>
+        <Text style={styles.supportText}>{pick(lang, "Keep the first version structured and simple, then expand later.", "先把提醒做成结构化 MVP，后面再扩展。")}</Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.label}>提醒类型</Text>
+        <Text style={styles.label}>{pick(lang, "Alert type", "提醒类型")}</Text>
         <View style={styles.row}>
-          <Pill active={createType === "price"} label="价格" onPress={() => onSetCreateType("price")} />
-          <Pill active={createType === "wallet"} label="钱包" onPress={() => onSetCreateType("wallet")} />
+          <Pill active={createType === "price"} label={pick(lang, "Price", "价格")} onPress={() => onSetCreateType("price")} />
+          <Pill active={createType === "wallet"} label={pick(lang, "Wallet", "钱包")} onPress={() => onSetCreateType("wallet")} />
           <Pill active={createType === "nft"} label="NFT" onPress={() => onSetCreateType("nft")} />
         </View>
 
         {createType === "price" ? (
           <>
-            <Text style={styles.label}>监控交易对</Text>
-            <View style={styles.row}>
-              {PRICE_PAIRS.map((pair) => (
-                <Pill key={pair.key} active={pricePairKey === pair.key} label={pair.label} onPress={() => onSetPricePairKey(pair.key)} />
-              ))}
-            </View>
-            <Text style={styles.supportText}>交易对从固定选项中选择，避免输入错误的 mint 或符号。</Text>
+            <Text style={styles.label}>{pick(lang, "Token CA", "代币合约地址")}</Text>
+            <Text style={styles.supportText}>{pick(lang, "Paste a Solana token CA. The app will resolve the token name and track it against USDC.", "输入 Solana 代币合约地址，App 会解析代币名称，并按该代币对 USDC 的价格进行提醒。")}</Text>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={onSetTokenMintInput}
+              placeholder={pick(lang, "Paste token CA", "粘贴代币合约地址")}
+              placeholderTextColor="#6f8195"
+              style={styles.input}
+              value={tokenMintInput}
+            />
+            {resolvingToken ? <Text style={styles.supportText}>{pick(lang, "Resolving token...", "正在识别代币...")}</Text> : null}
+            {resolvedToken ? (
+              <View style={styles.previewCard}>
+                <Text style={styles.label}>{pick(lang, "Resolved token", "识别结果")}</Text>
+                <Text style={styles.alertName}>{resolvedToken.name}</Text>
+                <Text style={styles.detailText}>{pick(lang, "Symbol", "符号")}：{resolvedToken.symbol}</Text>
+                <Text style={styles.detailText}>{pick(lang, "Tracking pair", "追踪交易对")}：{resolvedToken.symbol} / USDC</Text>
+              </View>
+            ) : null}
 
-            <Text style={styles.label}>触发方向</Text>
+            <Text style={styles.label}>{pick(lang, "Direction", "触发方向")}</Text>
             <View style={styles.row}>
-              <Pill active={priceDirection === "above"} label="价格高于" onPress={() => onSetPriceDirection("above")} />
-              <Pill active={priceDirection === "below"} label="价格低于" onPress={() => onSetPriceDirection("below")} />
+              <Pill active={priceDirection === "above"} label={pick(lang, "Price above", "价格高于")} onPress={() => onSetPriceDirection("above")} />
+              <Pill active={priceDirection === "below"} label={pick(lang, "Price below", "价格低于")} onPress={() => onSetPriceDirection("below")} />
             </View>
 
-            <Text style={styles.label}>目标价格</Text>
-            <Text style={styles.supportText}>这里只输入数字，条件文案会自动生成。</Text>
+            <Text style={styles.label}>{pick(lang, "Target price", "目标价格")}</Text>
+            <Text style={styles.supportText}>{pick(lang, "Only enter the number. The rule text is generated automatically.", "这里只输入数字，条件文案会自动生成。")}</Text>
             <TextInput
               keyboardType="decimal-pad"
               onChangeText={onSetPriceThreshold}
-              placeholder="例如 200"
+              placeholder={pick(lang, "For example 200", "例如 200")}
               placeholderTextColor="#6f8195"
               style={styles.input}
               value={priceThreshold}
@@ -1222,27 +1339,19 @@ function CreateTab({
 
         {createType === "wallet" ? (
           <>
-            <Text style={styles.label}>监控对象</Text>
+            <Text style={styles.label}>{pick(lang, "Target wallet", "监控对象")}</Text>
             <Text style={styles.detailText}>{walletAddress}</Text>
-            <Text style={styles.supportText}>钱包提醒固定监控当前连接的钱包地址。</Text>
+            <Text style={styles.supportText}>{pick(lang, "Wallet alerts always watch the currently connected wallet.", "钱包提醒固定监控当前连接的钱包地址。")}</Text>
 
-            <Text style={styles.label}>重点监控什么异动</Text>
+            <Text style={styles.label}>{pick(lang, "Watch for", "重点监控什么异动")}</Text>
             <View style={styles.row}>
-              <Pill
-                active={walletWatchKind === "receive_transfer"}
-                label="收到转账"
-                onPress={() => onSetWalletWatchKind("receive_transfer")}
-              />
-              <Pill
-                active={walletWatchKind === "send_transfer"}
-                label="转出资产"
-                onPress={() => onSetWalletWatchKind("send_transfer")}
-              />
-              <Pill active={walletWatchKind === "new_token"} label="新代币" onPress={() => onSetWalletWatchKind("new_token")} />
-              <Pill active={walletWatchKind === "receive_nft"} label="收到 NFT" onPress={() => onSetWalletWatchKind("receive_nft")} />
+              <Pill active={walletWatchKind === "receive_transfer"} label={pick(lang, "Incoming transfer", "收到转账")} onPress={() => onSetWalletWatchKind("receive_transfer")} />
+              <Pill active={walletWatchKind === "send_transfer"} label={pick(lang, "Outgoing transfer", "转出资产")} onPress={() => onSetWalletWatchKind("send_transfer")} />
+              <Pill active={walletWatchKind === "new_token"} label={pick(lang, "New token", "新代币")} onPress={() => onSetWalletWatchKind("new_token")} />
+              <Pill active={walletWatchKind === "receive_nft"} label={pick(lang, "Receive NFT", "收到 NFT")} onPress={() => onSetWalletWatchKind("receive_nft")} />
             </View>
-            <Text style={styles.supportText}>钱包提醒现在走后端真实监听：SOL 余额变化、新代币出现、收到 NFT。</Text>
-            <Text style={styles.supportText}>{walletWatchDescription(walletWatchKind)}</Text>
+            <Text style={styles.supportText}>{pick(lang, "Wallet alerts use the backend watcher for SOL balance changes, new tokens, and NFTs.", "钱包提醒现在走后端真实监听：SOL 余额变化、新代币出现、收到 NFT。")}</Text>
+            <Text style={styles.supportText}>{walletWatchDescription(walletWatchKind, lang)}</Text>
           </>
         ) : null}
 
@@ -1255,18 +1364,18 @@ function CreateTab({
               <Pill active={nftCollection === "Okay Bears"} label="Okay Bears" onPress={() => onSetNftCollection("Okay Bears")} />
             </View>
 
-            <Text style={styles.label}>触发方向</Text>
+            <Text style={styles.label}>{pick(lang, "Direction", "触发方向")}</Text>
             <View style={styles.row}>
-              <Pill active={nftDirection === "above"} label="地板价高于" onPress={() => onSetNftDirection("above")} />
-              <Pill active={nftDirection === "below"} label="地板价低于" onPress={() => onSetNftDirection("below")} />
+              <Pill active={nftDirection === "above"} label={pick(lang, "Floor above", "地板价高于")} onPress={() => onSetNftDirection("above")} />
+              <Pill active={nftDirection === "below"} label={pick(lang, "Floor below", "地板价低于")} onPress={() => onSetNftDirection("below")} />
             </View>
 
-            <Text style={styles.label}>目标价格</Text>
-            <Text style={styles.supportText}>这里只输入数字，NFT 提醒名称和条件会自动生成。</Text>
+            <Text style={styles.label}>{pick(lang, "Target floor", "目标价格")}</Text>
+            <Text style={styles.supportText}>{pick(lang, "Only enter the number. The NFT rule text is generated automatically.", "这里只输入数字，NFT 提醒名称和条件会自动生成。")}</Text>
             <TextInput
               keyboardType="decimal-pad"
               onChangeText={onSetNftThreshold}
-              placeholder="例如 55"
+              placeholder={pick(lang, "For example 55", "例如 55")}
               placeholderTextColor="#6f8195"
               style={styles.input}
               value={nftThreshold}
@@ -1275,16 +1384,28 @@ function CreateTab({
         ) : null}
 
         <View style={styles.previewCard}>
-          <Text style={styles.label}>将要创建的提醒</Text>
+          <Text style={styles.label}>{pick(lang, "Preview", "将要创建的提醒")}</Text>
           <Text style={styles.alertName}>
-            {previewAlertName(createType, pricePairKey, priceDirection, priceThreshold, walletWatchKind, nftCollection, nftDirection, nftThreshold)}
+            {previewAlertName(
+              lang,
+              createType,
+              resolvedToken?.symbol,
+              priceDirection,
+              priceThreshold,
+              walletWatchKind,
+              nftCollection,
+              nftDirection,
+              nftThreshold
+            )}
           </Text>
-          <Text style={styles.detailText}>监控对象：{previewTarget(createType, pricePairKey, nftCollection, walletAddress)}</Text>
-          <Text style={styles.detailText}>触发条件：{previewCondition(createType, priceDirection, priceThreshold, walletWatchKind, nftDirection, nftThreshold)}</Text>
+          <Text style={styles.detailText}>
+            {pick(lang, "Target", "监控对象")}：{previewTarget(lang, createType, resolvedToken?.symbol, nftCollection, walletAddress)}
+          </Text>
+          <Text style={styles.detailText}>{pick(lang, "Condition", "触发条件")}：{previewCondition(lang, createType, priceDirection, priceThreshold, walletWatchKind, nftDirection, nftThreshold)}</Text>
         </View>
 
         <Pressable style={styles.primaryCta} onPress={onCreateAlert}>
-          <Text style={styles.primaryCtaText}>{creatingAlert ? "创建中..." : "创建提醒"}</Text>
+          <Text style={styles.primaryCtaText}>{creatingAlert ? pick(lang, "Creating...", "创建中...") : pick(lang, "Create alert", "创建提醒")}</Text>
         </Pressable>
       </View>
     </View>
@@ -1292,45 +1413,45 @@ function CreateTab({
 }
 
 function MeTab({
+  lang,
   nativeWalletEnabled,
   onTestAlertNotification,
-  serverBaseUrl,
   walletAddress,
   walletConnected,
   onConnectWallet,
-  onDisconnectWallet,
-  onSetServerBaseUrl
+  onDisconnectWallet
 }: {
+  lang: Lang;
   nativeWalletEnabled: boolean;
   onTestAlertNotification: () => Promise<void>;
-  serverBaseUrl: string;
   walletAddress: string;
   walletConnected: boolean;
   onConnectWallet: () => Promise<void>;
   onDisconnectWallet: () => Promise<void>;
-  onSetServerBaseUrl: (value: string) => void;
 }) {
   return (
     <View style={styles.stack}>
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>钱包</Text>
-        <Text style={styles.detailText}>当前地址：{walletAddress}</Text>
-        <Text style={styles.supportText}>{nativeWalletEnabled ? "使用已安装的 Seeker Dev Client 连接钱包。" : "当前是 Expo Go，仅能预览界面。"}</Text>
+        <Text style={styles.sectionTitle}>{pick(lang, "Wallet", "钱包")}</Text>
+        <Text style={styles.detailText}>{pick(lang, "Current address", "当前地址")}：{walletAddress}</Text>
+        <Text style={styles.supportText}>
+          {nativeWalletEnabled
+            ? pick(lang, "Use the installed Seeker Dev Client to connect the wallet.", "使用已安装的 Seeker Dev Client 连接钱包。")
+            : pick(lang, "Running in Expo Go. You can only preview the UI.", "当前是 Expo Go，仅能预览界面。")}
+        </Text>
         <View style={styles.row}>
           <Pressable style={styles.button} onPress={walletConnected ? onDisconnectWallet : onConnectWallet}>
-            <Text style={styles.buttonText}>{walletConnected ? "断开连接" : "连接钱包"}</Text>
+            <Text style={styles.buttonText}>{walletConnected ? pick(lang, "Disconnect", "断开连接") : pick(lang, "Connect wallet", "连接钱包")}</Text>
           </Pressable>
         </View>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>服务配置</Text>
-        <Text style={styles.label}>后端地址</Text>
-        <TextInput autoCapitalize="none" onChangeText={onSetServerBaseUrl} style={styles.input} value={serverBaseUrl} />
-        <Text style={styles.supportText}>后续提醒同步、推送 token 注册、链上监听服务都走这个地址。</Text>
+        <Text style={styles.sectionTitle}>{pick(lang, "Notifications", "通知")}</Text>
+        <Text style={styles.supportText}>{pick(lang, "Use the test button below to confirm sound and system notifications are working.", "用下面的测试按钮确认声音和系统通知是否正常。")}</Text>
         <View style={styles.row}>
           <Pressable style={styles.secondaryButton} onPress={() => void onTestAlertNotification()}>
-            <Text style={styles.secondaryButtonText}>测试通知声音</Text>
+            <Text style={styles.secondaryButtonText}>{pick(lang, "Test alert sound", "测试通知声音")}</Text>
           </Pressable>
         </View>
       </View>
@@ -1338,7 +1459,7 @@ function MeTab({
   );
 }
 
-function MetricCard({ label, tone, value }: { label: string; tone: "blue" | "green" | "orange"; value: string }) {
+function MetricCard({ label, tone, value }: { lang: Lang; label: string; tone: "blue" | "green" | "orange"; value: string }) {
   return (
     <View style={[styles.metricCard, tone === "green" ? styles.metricGreen : null, tone === "orange" ? styles.metricOrange : null]}>
       <Text style={styles.metricValue}>{value}</Text>
@@ -1347,7 +1468,7 @@ function MetricCard({ label, tone, value }: { label: string; tone: "blue" | "gre
   );
 }
 
-function StatusBadge({ status }: { status: AlertStatus }) {
+function StatusBadge({ lang, status }: { lang: Lang; status: AlertStatus }) {
   return (
     <View
       style={[
@@ -1356,7 +1477,7 @@ function StatusBadge({ status }: { status: AlertStatus }) {
         status === "paused" ? styles.badgePaused : null
       ]}
     >
-      <Text style={styles.badgeText}>{formatStatus(status)}</Text>
+      <Text style={styles.badgeText}>{formatStatus(status, lang)}</Text>
     </View>
   );
 }
@@ -1377,71 +1498,90 @@ function Pill({ active, label, onPress }: { active: boolean; label: string; onPr
   );
 }
 
-function formatStatus(status: AlertStatus): string {
+function LanguageButton({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={[styles.languageButton, active ? styles.languageButtonActive : null]}>
+      <Text style={[styles.languageButtonText, active ? styles.languageButtonTextActive : null]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function pick(lang: Lang, en: string, zh: string): string {
+  return lang === "zh" ? zh : en;
+}
+
+function formatStatus(status: AlertStatus, lang: Lang): string {
   if (status === "active") {
-    return "监控中";
+    return pick(lang, "Active", "监控中");
   }
   if (status === "triggered") {
-    return "已命中";
+    return pick(lang, "Triggered", "已命中");
   }
-  return "已暂停";
+  return pick(lang, "Paused", "已暂停");
 }
 
-function formatType(type: AlertType): string {
+function formatType(type: AlertType, lang: Lang): string {
   if (type === "price") {
-    return "价格提醒";
+    return pick(lang, "Price alert", "价格提醒");
   }
   if (type === "wallet") {
-    return "钱包异动";
+    return pick(lang, "Wallet alert", "钱包异动");
   }
-  if (type === "nft") {
-    return "NFT 动态";
-  }
-  return "链上事件";
+  return pick(lang, "NFT alert", "NFT 动态");
 }
 
-function walletWatchDescription(kind: WalletWatchKind): string {
+function walletWatchDescription(kind: WalletWatchKind, lang: Lang): string {
   if (kind === "receive_transfer") {
-    return "适合监控钱包收到 SOL 或 SPL 代币的入账变化。";
+    return pick(lang, "Best for incoming SOL or SPL token transfers.", "适合监控钱包收到 SOL 或 SPL 代币的入账变化。");
   }
   if (kind === "send_transfer") {
-    return "适合监控资金被转出，及时发现异常扣款或手动转账。";
+    return pick(lang, "Best for outgoing funds and abnormal deductions.", "适合监控资金被转出，及时发现异常扣款或手动转账。");
   }
   if (kind === "new_token") {
-    return "适合监控钱包第一次出现某个新代币，包括空投和新买入资产。";
+    return pick(lang, "Best for the first appearance of a new token, including airdrops or fresh buys.", "适合监控钱包第一次出现某个新代币，包括空投和新买入资产。");
   }
-  return "适合监控钱包收到新的 NFT 或 compressed NFT。";
+  return pick(lang, "Best for newly received NFTs.", "适合监控钱包收到新的 NFT。");
 }
 
-function walletAlertName(kind: WalletWatchKind): string {
+function walletAlertName(kind: WalletWatchKind, lang: Lang): string {
   if (kind === "receive_transfer") {
-    return "钱包收到转账";
+    return pick(lang, "Incoming wallet transfer", "钱包收到转账");
   }
   if (kind === "send_transfer") {
-    return "钱包转出资产";
+    return pick(lang, "Outgoing wallet transfer", "钱包转出资产");
   }
   if (kind === "new_token") {
-    return "钱包出现新代币";
+    return pick(lang, "New token in wallet", "钱包出现新代币");
   }
-  return "钱包收到 NFT";
+  return pick(lang, "NFT received in wallet", "钱包收到 NFT");
 }
 
-function walletCondition(kind: WalletWatchKind): string {
+function walletCondition(kind: WalletWatchKind, lang: Lang): string {
   if (kind === "receive_transfer") {
-    return "检测到 SOL 或 SPL 代币转入";
+    return pick(lang, "Detect incoming SOL or SPL token transfers", "检测到 SOL 或 SPL 代币转入");
   }
   if (kind === "send_transfer") {
-    return "检测到 SOL 或 SPL 代币转出";
+    return pick(lang, "Detect outgoing SOL or SPL token transfers", "检测到 SOL 或 SPL 代币转出");
   }
   if (kind === "new_token") {
-    return "检测到钱包新增代币资产";
+    return pick(lang, "Detect a newly appeared token asset", "检测到钱包新增代币资产");
   }
-  return "检测到收到新的 NFT";
+  return pick(lang, "Detect a newly received NFT", "检测到收到新的 NFT");
+}
+
+function priceAlertName(symbol: string, direction: PriceDirection, targetPrice: number, lang: Lang): string {
+  return pick(lang, `${symbol} ${direction === "above" ? "above" : "below"} ${targetPrice}`, `${symbol} ${direction === "above" ? "高于" : "低于"} ${targetPrice}`);
+}
+
+function priceConditionLabel(direction: PriceDirection, targetPrice: number, currentPrice: number | undefined, lang: Lang): string {
+  const base = pick(lang, `Price ${direction === "above" ? "above" : "below"} ${targetPrice}`, `价格${direction === "above" ? "高于" : "低于"} ${targetPrice}`);
+  return currentPrice != null ? pick(lang, `${base}, current ${currentPrice.toFixed(4)}`, `${base}，当前 ${currentPrice.toFixed(4)}`) : base;
 }
 
 function previewAlertName(
+  lang: Lang,
   type: AlertType,
-  pricePairKey: PricePairKey,
+  priceSymbol: string | undefined,
   priceDirection: PriceDirection,
   priceThreshold: string,
   walletWatchKind: WalletWatchKind,
@@ -1450,27 +1590,24 @@ function previewAlertName(
   nftThreshold: string
 ): string {
   if (type === "price") {
-    const symbol = (PRICE_PAIRS.find((item) => item.key === pricePairKey) ?? PRICE_PAIRS[0]).label.split(" / ")[0];
-    return `${symbol} ${priceDirection === "above" ? "高于" : "低于"} ${priceThreshold || "--"}`;
+    const symbol = priceSymbol ?? pick(lang, "Token", "代币");
+    return pick(lang, `${symbol} ${priceDirection === "above" ? "above" : "below"} ${priceThreshold || "--"}`, `${symbol} ${priceDirection === "above" ? "高于" : "低于"} ${priceThreshold || "--"}`);
   }
   if (type === "wallet") {
-    if (walletWatchKind === "receive_transfer") {
-      return "主钱包收到转账";
-    }
-    if (walletWatchKind === "send_transfer") {
-      return "主钱包转出资产";
-    }
-    if (walletWatchKind === "new_token") {
-      return "主钱包出现新代币";
-    }
-    return "主钱包收到 NFT";
+    return walletAlertName(walletWatchKind, lang);
   }
-  return `${nftCollection} 地板价${nftDirection === "above" ? "高于" : "低于"} ${nftThreshold || "--"}`;
+  return pick(lang, `${nftCollection} floor ${nftDirection === "above" ? "above" : "below"} ${nftThreshold || "--"}`, `${nftCollection} 地板价${nftDirection === "above" ? "高于" : "低于"} ${nftThreshold || "--"}`);
 }
 
-function previewTarget(type: AlertType, pricePairKey: PricePairKey, nftCollection: NftCollection, walletAddress: string): string {
+function previewTarget(
+  lang: Lang,
+  type: AlertType,
+  priceSymbol: string | undefined,
+  nftCollection: NftCollection,
+  walletAddress: string
+): string {
   if (type === "price") {
-    return (PRICE_PAIRS.find((item) => item.key === pricePairKey) ?? PRICE_PAIRS[0]).label;
+    return `${priceSymbol ?? pick(lang, "Token", "代币")} / USDC`;
   }
   if (type === "wallet") {
     return walletAddress;
@@ -1479,6 +1616,7 @@ function previewTarget(type: AlertType, pricePairKey: PricePairKey, nftCollectio
 }
 
 function previewCondition(
+  lang: Lang,
   type: AlertType,
   priceDirection: PriceDirection,
   priceThreshold: string,
@@ -1487,12 +1625,12 @@ function previewCondition(
   nftThreshold: string
 ): string {
   if (type === "price") {
-    return `价格${priceDirection === "above" ? "高于" : "低于"} ${priceThreshold || "--"}`;
+    return pick(lang, `Price ${priceDirection === "above" ? "above" : "below"} ${priceThreshold || "--"}`, `价格${priceDirection === "above" ? "高于" : "低于"} ${priceThreshold || "--"}`);
   }
   if (type === "wallet") {
-    return walletCondition(walletWatchKind);
+    return walletCondition(walletWatchKind, lang);
   }
-  return `Floor ${nftDirection === "above" ? "高于" : "低于"} ${nftThreshold || "--"} SOL`;
+  return pick(lang, `Floor ${nftDirection === "above" ? "above" : "below"} ${nftThreshold || "--"} SOL`, `Floor ${nftDirection === "above" ? "高于" : "低于"} ${nftThreshold || "--"} SOL`);
 }
 
 function buildLocalAlert(
@@ -1501,21 +1639,22 @@ function buildLocalAlert(
   nftCollection: NftCollection,
   nftDirection: PriceDirection,
   nftThreshold: string,
-  walletAddress: string
+  walletAddress: string | undefined,
+  lang: Lang
 ): RadarAlert | null {
   if (type === "wallet") {
-    if (walletAddress === "未连接钱包") {
+    if (!walletAddress) {
       return null;
     }
 
     return {
       id: `alert_${Date.now()}`,
-      name: previewAlertName(type, "SOL_USDC", "above", "", walletWatchKind, nftCollection, nftDirection, nftThreshold),
+      name: previewAlertName(lang, type, undefined, "above", "", walletWatchKind, nftCollection, nftDirection, nftThreshold),
       type,
       status: "active",
       target: walletAddress,
-      condition: walletCondition(walletWatchKind),
-      lastCheckedAt: "刚刚创建",
+      condition: walletCondition(walletWatchKind, lang),
+      lastCheckedAt: pick(lang, "Just created", "刚刚创建"),
       walletWatchKind
     };
   }
@@ -1527,35 +1666,18 @@ function buildLocalAlert(
 
   return {
     id: `alert_${Date.now()}`,
-    name: previewAlertName(type, "SOL_USDC", "above", "", walletWatchKind, nftCollection, nftDirection, nftThreshold),
+    name: previewAlertName(lang, type, undefined, "above", "", walletWatchKind, nftCollection, nftDirection, nftThreshold),
     type,
     status: "active",
     target: nftCollection,
-    condition: `Floor ${nftDirection === "above" ? "高于" : "低于"} ${threshold} SOL`,
-    lastCheckedAt: "刚刚创建"
+    condition: pick(lang, `Floor ${nftDirection === "above" ? "above" : "below"} ${threshold} SOL`, `Floor ${nftDirection === "above" ? "高于" : "低于"} ${threshold} SOL`),
+    lastCheckedAt: pick(lang, "Just created", "刚刚创建")
   };
 }
 
-function parsePriceCondition(rawCondition: string): { direction: "above" | "below"; targetPrice: number } {
-  const normalized = rawCondition.trim().toLowerCase();
-  const match = normalized.match(/(\d+(?:\.\d+)?)/);
-
-  if (!match) {
-    throw new Error("价格条件里没有识别到数字，例如“价格高于 200”");
-  }
-
-  const targetPrice = Number(match[1]);
-  if (!Number.isFinite(targetPrice) || targetPrice <= 0) {
-    throw new Error("价格条件里的数字无效");
-  }
-
-  const direction = normalized.includes("低于") || normalized.includes("below") ? "below" : "above";
-  return { direction, targetPrice };
-}
-
-function formatTimestamp(value?: string): string {
+function formatTimestamp(value: string | undefined, lang: Lang): string {
   if (!value) {
-    return "未检查";
+    return pick(lang, "Not checked", "未检查");
   }
 
   const date = new Date(value);
@@ -1563,7 +1685,7 @@ function formatTimestamp(value?: string): string {
     return value;
   }
 
-  return date.toLocaleString("zh-CN", {
+  return date.toLocaleString(lang === "zh" ? "zh-CN" : "en-US", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -1575,12 +1697,12 @@ function formatSol(lamports: number): string {
   return (lamports / 1_000_000_000).toFixed(4);
 }
 
-function formatWalletEvent(event: WalletAlertEventRecord): string {
+function formatWalletEvent(event: WalletAlertEventRecord, lang: Lang): string {
   if (event.watchKind === "receive_transfer" || event.watchKind === "send_transfer") {
-    return `余额变化 ${formatSol(event.deltaLamports)} SOL | 当前 ${formatSol(event.currentBalanceLamports)} SOL`;
+    return pick(lang, `Balance change ${formatSol(event.deltaLamports)} SOL | current ${formatSol(event.currentBalanceLamports)} SOL`, `余额变化 ${formatSol(event.deltaLamports)} SOL | 当前 ${formatSol(event.currentBalanceLamports)} SOL`);
   }
 
-  return `${event.watchKind === "new_token" ? "新代币" : "NFT"}: ${event.assetMint ?? "未知资产"}`;
+  return pick(lang, `${event.watchKind === "new_token" ? "New token" : "NFT"}: ${event.assetMint ?? "Unknown asset"}`, `${event.watchKind === "new_token" ? "新代币" : "NFT"}: ${event.assetMint ?? "未知资产"}`);
 }
 
 async function prepareNotifications(): Promise<void> {
@@ -1592,7 +1714,7 @@ async function prepareNotifications(): Promise<void> {
   await Notifications.setNotificationChannelAsync(ALERT_NOTIFICATION_CHANNEL, {
     name: "Price Alerts",
     importance: Notifications.AndroidImportance.HIGH,
-    sound: "alert_tone.wav",
+    sound: "metal_gear_alert.wav",
     vibrationPattern: [0, 250, 150, 250],
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC
   });
@@ -1676,7 +1798,7 @@ function extractDomain(serverBaseUrl: string): string {
   try {
     return new URL(serverBaseUrl).hostname;
   } catch {
-    return "seeker-radar.local";
+    return "seeker-alert.local";
   }
 }
 
@@ -1693,6 +1815,15 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 12
   },
+  rowBetweenTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12
+  },
+  headerCopy: {
+    flex: 1
+  },
   brand: {
     color: "#f4f7fb",
     fontSize: 28,
@@ -1701,6 +1832,30 @@ const styles = StyleSheet.create({
   headerSub: {
     color: "#93a9c2",
     marginTop: 4
+  },
+  languageToggle: {
+    flexDirection: "row",
+    gap: 8
+  },
+  languageButton: {
+    backgroundColor: "#132234",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#20354c",
+    paddingHorizontal: 10,
+    paddingVertical: 7
+  },
+  languageButtonActive: {
+    backgroundColor: "#1e4478",
+    borderColor: "#2e6fcb"
+  },
+  languageButtonText: {
+    color: "#a9bdd2",
+    fontWeight: "700",
+    fontSize: 12
+  },
+  languageButtonTextActive: {
+    color: "#ffffff"
   },
   content: {
     paddingHorizontal: 16,
@@ -1838,10 +1993,6 @@ const styles = StyleSheet.create({
   primaryCtaText: {
     color: "#101822",
     fontWeight: "800"
-  },
-  value: {
-    color: "#f4f7fb",
-    lineHeight: 20
   },
   alertRow: {
     flexDirection: "row",

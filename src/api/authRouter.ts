@@ -43,7 +43,7 @@ export function buildAuthRouter(authStore: AuthStoreContract): Router {
     }
 
     const nonce = await authStore.issueNonce(wallet);
-    const message = `seeker alert login\nwallet=${wallet}\nnonce=${nonce}`;
+    const message = `autotradeSKR login\nwallet=${wallet}\nnonce=${nonce}`;
 
     res.json({ wallet, nonce, message, expiresInSec: 300 });
   });
@@ -67,7 +67,7 @@ export function buildAuthRouter(authStore: AuthStoreContract): Router {
       return;
     }
 
-    const message = `seeker alert login\nwallet=${wallet}\nnonce=${nonce}`;
+    const message = `autotradeSKR login\nwallet=${wallet}\nnonce=${nonce}`;
     const sigOk = verifySignature(wallet, message, signature);
     if (!sigOk) {
       res.status(401).json({ error: "signature verification failed" });

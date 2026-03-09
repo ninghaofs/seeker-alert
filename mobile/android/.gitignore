@@ -11,6 +11,8 @@ local.properties
 *.iml
 *.hprof
 .cxx/
+keystore.properties
+signing/
 
 # Bundle artifacts
 *.jsbundle

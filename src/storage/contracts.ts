@@ -22,6 +22,7 @@ export interface PriceAlertStoreContract {
   getByIdForOwner(id: string, ownerWallet: string): Promise<PriceAlert | undefined>;
   upsert(alert: PriceAlert): Promise<void>;
   remove(id: string): Promise<boolean>;
+  removeForOwner(id: string, ownerWallet: string): Promise<boolean>;
 }
 
 export interface WalletAlertStoreContract {
@@ -32,6 +33,7 @@ export interface WalletAlertStoreContract {
   getByIdForOwner(id: string, ownerWallet: string): Promise<WalletAlert | undefined>;
   upsert(alert: WalletAlert): Promise<void>;
   remove(id: string): Promise<boolean>;
+  removeForOwner(id: string, ownerWallet: string): Promise<boolean>;
 }
 
 export interface PriceAlertEventStoreContract {

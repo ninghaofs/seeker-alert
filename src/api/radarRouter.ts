@@ -3,6 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 import { z } from "zod";
 import { PriceAlertEngine } from "../engine/priceAlertEngine.js";
 import { WalletAlertEngine } from "../engine/walletAlertEngine.js";
+import { TokenRegistry } from "../solana/tokenRegistry.js";
 import type {
   PriceAlertEventStoreContract,
   PriceAlertStoreContract,
@@ -53,9 +54,24 @@ export function buildRadarRouter(
   walletAlertEngine: WalletAlertEngine
 ): Router {
   const router = Router();
+  const tokenRegistry = new TokenRegistry();
 
   router.get("/price-alerts", async (req, res) => {
     res.json(await priceAlertStore.listByOwner(req.auth!.wallet));
+  });
+
+  router.get("/token-meta", async (req, res) => {
+    const mint = typeof req.query.mint === "string" ? req.query.mint : "";
+    if (!mint) {
+      res.status(400).json({ error: "missing mint" });
+      return;
+    }
+
+    try {
+      res.json(await tokenRegistry.getTokenMetadata(mint));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   router.get("/status", async (req, res) => {
@@ -110,7 +126,7 @@ export function buildRadarRouter(
 
   router.post("/price-alerts/check", async (_req, res) => {
     const checked = await priceAlertEngine.checkAll();
-    res.json({ ok: true, alerts: checked });
+    res.json({ ok: true, alerts: checked.filter((item) => item.ownerWallet === _req.auth!.wallet) });
   });
 
   router.patch("/price-alerts/:id", async (req, res) => {
@@ -143,7 +159,7 @@ export function buildRadarRouter(
       return;
     }
 
-    const removed = await priceAlertStore.remove(req.params.id);
+    const removed = await priceAlertStore.removeForOwner(req.params.id, req.auth!.wallet);
     if (!removed) {
       res.status(404).json({ error: "price alert not found" });
       return;
@@ -177,7 +193,7 @@ export function buildRadarRouter(
 
   router.post("/wallet-alerts/check", async (_req, res) => {
     const checked = await walletAlertEngine.checkAll();
-    res.json({ ok: true, alerts: checked });
+    res.json({ ok: true, alerts: checked.filter((item) => item.ownerWallet === _req.auth!.wallet) });
   });
 
   router.patch("/wallet-alerts/:id", async (req, res) => {
@@ -210,7 +226,7 @@ export function buildRadarRouter(
       return;
     }
 
-    const removed = await walletAlertStore.remove(req.params.id);
+    const removed = await walletAlertStore.removeForOwner(req.params.id, req.auth!.wallet);
     if (!removed) {
       res.status(404).json({ error: "wallet alert not found" });
       return;

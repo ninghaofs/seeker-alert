@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "seeker alert",
-    "slug": "seeker-radar",
+    "slug": "seeker-alert",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -29,7 +29,7 @@
       [
         "expo-notifications",
         {
-          "sounds": ["./assets/alert_tone.wav"]
+          "sounds": ["./assets/metal_gear_alert.wav"]
         }
       ]
     ],

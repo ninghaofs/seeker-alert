@@ -9,6 +9,7 @@ import { PriceAlertEngine } from "./engine/priceAlertEngine.js";
 import { WalletAlertEngine } from "./engine/walletAlertEngine.js";
 import { getFirebaseDb } from "./firebaseAdmin.js";
 import { PriceFeed } from "./solana/priceFeed.js";
+import { TokenRegistry } from "./solana/tokenRegistry.js";
 import { FirestoreAuthStore } from "./storage/firestoreAuthStore.js";
 import { FirestorePriceAlertEventStore } from "./storage/firestorePriceAlertEventStore.js";
 import { FirestorePriceAlertStore } from "./storage/firestorePriceAlertStore.js";
@@ -28,6 +29,7 @@ const priceAlertEventStore = new FirestorePriceAlertEventStore(db);
 const walletAlertStore = new FirestoreWalletAlertStore(db);
 const walletAlertEventStore = new FirestoreWalletAlertEventStore(db);
 const priceFeed = new PriceFeed();
+const tokenRegistry = new TokenRegistry();
 const priceAlertEngine = new PriceAlertEngine(priceAlertStore, priceAlertEventStore, priceFeed, priceAlertIntervalMs);
 const walletAlertEngine = new WalletAlertEngine(rpcUrl, walletAlertStore, walletAlertEventStore, walletAlertIntervalMs);
 const authMiddleware = buildAuthMiddleware(authStore);
@@ -45,6 +47,20 @@ app.get("/health", (_req, res) => {
     walletAlertIntervalMs,
     rpcUrl
   });
+});
+
+app.get("/api/token-meta", async (req, res) => {
+  const mint = typeof req.query.mint === "string" ? req.query.mint : "";
+  if (!mint) {
+    res.status(400).json({ error: "missing mint" });
+    return;
+  }
+
+  try {
+    res.json(await tokenRegistry.getTokenMetadata(mint));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 app.use("/api/auth", buildAuthRouter(authStore));

@@ -43,6 +43,22 @@ export class FirestoreWalletAlertStore implements WalletAlertStoreContract {
     return true;
   }
 
+  async removeForOwner(id: string, ownerWallet: string): Promise<boolean> {
+    const ref = this.db.collection("wallet_alerts").doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return false;
+    }
+
+    const data = snap.data() as WalletAlert;
+    if (data.ownerWallet !== ownerWallet) {
+      return false;
+    }
+
+    await ref.delete();
+    return true;
+  }
+
   private async fetchAll(): Promise<WalletAlert[]> {
     const snap = await this.db.collection("wallet_alerts").get();
     return snap.docs.map((doc) => doc.data() as WalletAlert).sort((a, b) => b.createdAt.localeCompare(a.createdAt));

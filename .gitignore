@@ -2,3 +2,12 @@ node_modules
 dist
 .env
 data/trading-rules.json
+SIGNING.local.md
+mobile/android/keystore.properties
+mobile/android/signing/
+mobile/android/app/debug.keystore
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/.expo/
+mobile/.npm-cache/

@@ -1,6 +1,7 @@
 {
   "functions": {
-        "source": ".",
+    "codebase": "seeker-radar",
+    "source": ".",
     "runtime": "nodejs22",
     "ignore": [
       ".git",
