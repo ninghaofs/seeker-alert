@@ -111,9 +111,7 @@ Brand names, protocol names, and ecosystem references mentioned in this reposito
 ## License
 
 This repository is provided under the MIT License.
-
-If you want to make that explicit in GitHub, add a `LICENSE` file with the standard MIT license text.
-Until that file is added, treat this repository as source-available project code shared by the author for reference and collaboration.
+See the `LICENSE` file for the full license text.
 
 ## Release Signing
 

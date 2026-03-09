@@ -1,4 +1,9 @@
-import type { MarketPrice } from "../types/trading.js";
+type MarketPrice = {
+  inputMint: string;
+  outputMint: string;
+  price: number;
+  timestamp: number;
+};
 
 export class PriceFeed {
   private readonly baseUrl: string;
