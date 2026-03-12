@@ -84,34 +84,7 @@ Then deploy:
 npm run deploy:firebase
 ```
 
-## Privacy
 
-This public repository is sanitized for sharing.
-It does not include local signing keys, local caches, build outputs, runtime data, private Firebase credentials, or project-specific deployment secrets.
-
-The app itself is intended to work with wallet-based authentication.
-Users should not place private keys or seed phrases directly inside the app source or client configuration.
-
-If you deploy your own version, you are responsible for:
-
-- protecting your backend credentials
-- protecting any Firebase or cloud secrets
-- securing any signing keys used for Android release builds
-- complying with your own privacy policy and applicable laws
-
-## Copyright
-
-Copyright belongs to the repository owner and original contributors unless otherwise noted.
-
-Third-party libraries, SDKs, frameworks, and APIs used by this project remain subject to their own licenses and terms.
-That includes, for example, React Native, Expo, Firebase, Solana libraries, and any external APIs integrated by the project.
-
-Brand names, protocol names, and ecosystem references mentioned in this repository belong to their respective owners.
-
-## License
-
-This repository is provided under the MIT License.
-See the `LICENSE` file for the full license text.
 
 ## Release Signing
 
