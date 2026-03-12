@@ -1,3 +1,16 @@
+# License
+
+This open-source project is licensed under the MIT License.
+
+That means anyone may use, copy, modify, merge, publish, distribute, sublicense,
+and sell copies of the project, as long as the MIT copyright notice and license
+text are included in copies or substantial portions of the software.
+
+The canonical license text for this repository is also provided in the root
+`LICENSE` file.
+
+## MIT License
+
 MIT License
 
 Copyright (c) 2026 repository owner and contributors

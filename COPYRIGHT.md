@@ -2,12 +2,30 @@
 
 Copyright (c) 2026 repository owner and contributors.
 
-Unless otherwise stated, the original source code in this repository is owned by the repository owner and contributors.
+This repository is an open-source project released under the MIT License.
+Copyright ownership remains with the original authors and contributors, while
+use, modification, redistribution, and commercial reuse are permitted under the
+terms of the MIT License.
+
+## Scope
+
+The copyright notice in this repository applies to:
+
+- original source code in this repository
+- original documentation in this repository
+- original project-specific assets, unless otherwise noted
+
+## Contributions
+
+By contributing code or documentation to this repository, contributors are
+understood to license their contributions under the same MIT License unless a
+specific file or contribution is explicitly marked otherwise.
 
 ## Third-Party Components
 
-This project depends on third-party libraries, frameworks, SDKs, and external services.
-Those components remain the property of their respective authors and are governed by their own licenses and terms.
+This project depends on third-party libraries, frameworks, SDKs, and services.
+Those components remain subject to their own copyright notices, licenses, and
+terms.
 
 Examples include, but are not limited to:
 
@@ -17,12 +35,8 @@ Examples include, but are not limited to:
 - Solana libraries
 - Jupiter APIs
 
-## Brand and Ecosystem References
+## Trademarks and Names
 
-Names, trademarks, logos, protocol names, and ecosystem references mentioned in this repository belong to their respective owners.
-Their presence in this repository does not imply ownership transfer or independent trademark rights.
-
-## Repository Content
-
-Only the original code and original documentation contributed to this repository are covered by the repository's copyright notice.
-Third-party assets and dependencies retain their own attribution and licensing requirements.
+Names, trademarks, logos, protocol names, and ecosystem references mentioned in
+this repository belong to their respective owners. Their presence in this
+repository does not transfer trademark rights or independent ownership.
