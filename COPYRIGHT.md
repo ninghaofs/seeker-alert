@@ -1,33 +1,25 @@
-# Copyright
+# Copyright Notice
 
-Copyright (c) 2026 repository owner and contributors.
+Last updated: March 13, 2026
 
-This repository is an open-source project released under the MIT License.
-Copyright ownership remains with the original authors and contributors, while
-use, modification, redistribution, and commercial reuse are permitted under the
-terms of the MIT License.
+© 2026 seeker alert contributors. All rights in the original work are reserved by their respective authors, subject to the permissions granted by the MIT License.
 
-## Scope
+seeker alert is an open-source project.
+The original source code, documentation, and project-specific assets in this repository are provided under the MIT License unless otherwise stated.
 
-The copyright notice in this repository applies to:
+## Open-Source Scope
 
-- original source code in this repository
-- original documentation in this repository
-- original project-specific assets, unless otherwise noted
+The MIT License allows use, copying, modification, distribution, sublicensing, and sale of the software, provided that the copyright notice and license text are included in copies or substantial portions of the software.
 
-## Contributions
-
-By contributing code or documentation to this repository, contributors are
-understood to license their contributions under the same MIT License unless a
-specific file or contribution is explicitly marked otherwise.
+Copyright ownership still remains with the original authors and contributors.
+Open-source licensing does not transfer authorship or trademark ownership.
 
 ## Third-Party Components
 
-This project depends on third-party libraries, frameworks, SDKs, and services.
-Those components remain subject to their own copyright notices, licenses, and
-terms.
+seeker alert depends on third-party libraries, frameworks, SDKs, services, and APIs.
+Those components remain subject to their own copyright notices, licenses, and terms.
 
-Examples include, but are not limited to:
+Examples may include:
 
 - React Native
 - Expo
@@ -35,8 +27,15 @@ Examples include, but are not limited to:
 - Solana libraries
 - Jupiter APIs
 
-## Trademarks and Names
+## Trademarks
 
-Names, trademarks, logos, protocol names, and ecosystem references mentioned in
-this repository belong to their respective owners. Their presence in this
-repository does not transfer trademark rights or independent ownership.
+Project names, protocol names, product names, logos, and trademarks referenced in this repository belong to their respective owners.
+Their appearance in this project does not imply affiliation, endorsement, sponsorship, or transfer of trademark rights.
+
+## Responsibility for Distribution
+
+Anyone redistributing seeker alert or modified versions of it is responsible for complying with:
+
+- the MIT License for this project
+- the licenses of third-party dependencies
+- applicable copyright and trademark laws

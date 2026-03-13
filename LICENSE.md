@@ -1,19 +1,21 @@
 # License
 
-This open-source project is licensed under the MIT License.
+Last updated: March 13, 2026
 
-That means anyone may use, copy, modify, merge, publish, distribute, sublicense,
-and sell copies of the project, as long as the MIT copyright notice and license
-text are included in copies or substantial portions of the software.
+seeker alert is an open-source project released under the MIT License.
 
-The canonical license text for this repository is also provided in the root
-`LICENSE` file.
+This means you may use, copy, modify, merge, publish, distribute, sublicense,
+and sell copies of the project, as long as the copyright notice and the MIT
+license text are included in copies or substantial portions of the software.
+
+The canonical plain-text license for this repository is provided in the root
+`LICENSE` file. A readable copy is included below.
 
 ## MIT License
 
 MIT License
 
-Copyright (c) 2026 repository owner and contributors
+Copyright (c) 2026 seeker alert contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

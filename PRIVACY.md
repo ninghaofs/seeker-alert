@@ -1,54 +1,75 @@
-# Privacy
+# Privacy Policy
 
-## Overview
+Last updated: March 13, 2026
 
-seeker alert is designed as a wallet-connected Solana alert application.
-This repository is a public, sanitized codebase and does not include private runtime data, private signing keys, or private deployment credentials.
+seeker alert ("the app", "we", "our", or "us") respects user privacy.
+This Privacy Policy explains how information may be handled when seeker alert is used.
 
-## Data the App May Process
+## Information We May Process
 
-Depending on how you deploy and operate seeker alert, the app and backend may process:
+seeker alert is designed to minimize data collection.
+Depending on how the app and backend are deployed, we may process limited information such as:
 
-- public wallet addresses
-- alert rules created by users
-- alert history and notification events
-- token contract addresses and token metadata lookups
-- backend logs related to alert delivery and system health
+- Public wallet addresses used for login or alert ownership
+- Alert rules created by users
+- Alert event history and notification records
+- Device, crash, or diagnostic information
+- Basic technical logs needed for app stability and backend operation
 
-## Sensitive Data
+## Information We Do Not Intend to Collect
 
-The app should not require users to enter private keys or seed phrases directly into the app UI.
-If you deploy your own backend, you must not store private wallet material unless you have a clear security model and explicit user consent.
+We do **not** ask users to directly submit highly sensitive wallet material such as:
 
-## Deployment Responsibility
+- Seed phrases
+- Private keys
+- Secret recovery phrases
 
-If you run your own version of seeker alert, you are responsible for:
+We also do not intentionally collect personal identity data such as:
 
-- securing backend infrastructure
-- securing Firebase or cloud credentials
-- securing Android signing keys
-- defining and publishing your own privacy policy if you distribute the app publicly
-- complying with applicable privacy, data protection, and consumer laws in your target regions
-
-## Public Repository Scope
-
-This public repository is intentionally sanitized.
-It excludes:
-
-- local environment files
-- private Firebase bindings
-- release keystores
-- build outputs
-- runtime data files
-- local caches
+- Real name
+- Phone number
+- Home address
+- Government identification information
 
 ## Third-Party Services
 
-A deployment of seeker alert may depend on third-party services such as:
+seeker alert may rely on third-party services for functionality.
+Examples may include:
 
 - Solana RPC providers
 - Firebase
 - Jupiter APIs
-- wallet SDKs and mobile wallet adapters
+- Wallet SDKs and mobile wallet adapters
+- Crash reporting or analytics tools
 
-Use of those services is subject to their own privacy terms and policies.
+These services operate under their own privacy policies and terms.
+
+## How Information May Be Used
+
+Any limited information processed by seeker alert may be used to:
+
+- Deliver alerts and notifications
+- Maintain app security and stability
+- Fix bugs and crashes
+- Improve performance and user experience
+- Operate backend services required by the app
+
+## Data Security
+
+We take reasonable steps to reduce unnecessary data exposure.
+However, no app, backend, or cloud platform can guarantee absolute security.
+Anyone deploying their own version of seeker alert is responsible for securing infrastructure, credentials, and signing keys.
+
+## Open-Source Repository Scope
+
+This repository is published as an open-source project and is sanitized for sharing.
+It does not include private deployment secrets, local signing keys, local environment files, or private runtime data.
+
+## Changes to This Privacy Policy
+
+This Privacy Policy may be updated from time to time.
+Changes may be published in the repository or app distribution materials.
+
+## Contact
+
+If you have questions about this Privacy Policy, please contact the project maintainer through the repository on GitHub.
