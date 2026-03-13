@@ -86,6 +86,13 @@ npm run deploy:firebase
 
 
 
+## Legal
+
+- [Privacy Policy](./privacy-policy.md)
+- [Terms and Conditions](./terms-and-conditions.md)
+- [Copyright Notice](./COPYRIGHT.md)
+- [License](./LICENSE.md)
+
 ## Release Signing
 
 This public repo does not include any release keystore.
